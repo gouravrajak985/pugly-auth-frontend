@@ -4,13 +4,16 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Shield } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../utils/api';
-import { useToast } from '../contexts/ToastContext'
+import { useToast } from '../contexts/ToastContext';
+import { useAuth } from '../contexts/AuthContext';
 
 export function VerifyOtp() {
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
+  const [isVerifying, setIsVerifying] = useState(false);
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const { email } = useParams<{ email: string }>();
   const { showToast } = useToast();
+  const { auth, login } = useAuth();
   const navigate = useNavigate();
   useEffect(() => {
     if (inputRefs.current[0]) {
@@ -62,13 +65,64 @@ export function VerifyOtp() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const response = await api.post('/api/v1/users/otpverification', {
-      email,
-      inputOtp: otp.join(''),
-    });
-    console.log("Verify Otp Api Response:", response.data);
-    showToast('OTP verified successfully!', 'success');
-    navigate('/signin');
+    setIsVerifying(true);
+
+    try {
+      const response = await api.post('users/otpverification', {
+        email,
+        inputOtp: otp.join(''),
+      });
+      console.log("Verify Otp Api Response:", response.data);
+      
+      // Backend returns: { statusCode, success, message, data: { user object } }
+      // For OTP verification, we use the pending token from login/signup
+      const pendingToken = sessionStorage.getItem('pendingAuthToken');
+      
+      // Use pending token if available (from login/signup flow)
+      const token = pendingToken;
+      const code = pendingToken || 'verified';
+      
+      if (token) {
+        login(token);
+        sessionStorage.removeItem('pendingAuthToken');
+      }
+
+      showToast('OTP verified successfully!', 'success');
+
+      // Redirect to source domain with code and state
+      let finalRedirectUrl: string | null = null;
+      
+      if (auth.redirectUrl) {
+        // Use provided redirect URL
+        finalRedirectUrl = auth.redirectUrl;
+      } else if (auth.sourceDomain) {
+        // Construct redirect URL from source domain (default to /cb callback path)
+        const protocol = auth.sourceDomain.startsWith('http') ? '' : 'https://';
+        finalRedirectUrl = `${protocol}${auth.sourceDomain}/cb`;
+      }
+      
+      if (finalRedirectUrl) {
+        const redirectUrl = new URL(finalRedirectUrl);
+        // Use the code we determined above
+        redirectUrl.searchParams.set('code', code);
+        if (auth.state) {
+          redirectUrl.searchParams.set('state', auth.state);
+        }
+        window.location.href = redirectUrl.toString();
+      } else {
+        // No redirect URL, go to dashboard
+        navigate('/dashboard');
+      }
+    } catch (err: unknown) {
+      const errorMessage = 
+        (err as { response?: { data?: { message?: string } }; message?: string })?.response?.data?.message ||
+        (err as { message?: string })?.message ||
+        'OTP verification failed. Please try again.';
+      showToast(errorMessage, 'error');
+      console.error('OTP verification error:', err);
+    } finally {
+      setIsVerifying(false);
+    }
   };
 
   const handleResend = () => {
@@ -113,9 +167,9 @@ export function VerifyOtp() {
             <Button
               type="submit"
               className="w-full"
-              disabled={!isComplete}
+              disabled={!isComplete || isVerifying}
             >
-              Verify Code
+              {isVerifying ? 'Verifying...' : 'Verify Code'}
             </Button>
           </form>
         </CardContent>
