@@ -28,7 +28,7 @@ interface CustomAxiosRequestConfig extends InternalAxiosRequestConfig {
 
 // ✅ Create Axios instance
 const api: AxiosInstance = axios.create({
-  baseURL: 'http://localhost:8000/', // Replace with your backend URL
+  baseURL: 'http://localhost:4000/api/v1/', // Backend API base URL
   headers: {
     'Content-Type': 'application/json',
   },
@@ -37,7 +37,7 @@ const api: AxiosInstance = axios.create({
 // ✅ Request Interceptor — attach token only if requiresAuth = true
 api.interceptors.request.use(
   (config: CustomAxiosRequestConfig): CustomAxiosRequestConfig => {
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem('authToken');
 
     if (config.requiresAuth && token) {
       config.headers.Authorization = `Bearer ${token}`;
@@ -58,9 +58,9 @@ api.interceptors.response.use(
   (error: AxiosError<ApiErrorResponse>) => {
     // 1️⃣ Handle Unauthorized (401)
     if (error.response?.status === 401) {
-      localStorage.removeItem('token');
+      localStorage.removeItem('authToken');
       showGlobalToast('Session expired. Please login again.', 'error');
-      window.location.href = '/auth/login';
+      window.location.href = '/signin';
       return Promise.reject(error);
     }
 
