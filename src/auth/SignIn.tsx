@@ -18,7 +18,7 @@ export function SignIn() {
   const [showPasswordForm, setShowPasswordForm] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const { auth, setSourceDomain, setRedirectInfo } = useAuth();
+  const { auth, setSourceDomain, setRedirectInfo, login: loginUser } = useAuth();
   const { showToast } = useToast();
 
   // Email validation function
@@ -37,27 +37,33 @@ export function SignIn() {
         email: emailToCheck.trim(),
       });
 
-      const data = response.data;
-      console.log('Check user API response:', data);
+      console.log('Check user API full response:', response);
+      console.log('Check user API response.data:', response.data);
       
       // Backend returns: { statusCode, success, message, data: { exists, email } }
-      const exists = data.data?.exists || false;
+      const responseData = response.data;
+      const exists = responseData?.data?.exists ?? false;
       
-      if (exists) {
+      console.log('User exists check result:', exists);
+      
+      if (exists === true) {
         setShowPasswordForm(true);
         showToast('User found. Please enter your password.', 'success');
       } else {
         setError('User not found. Please sign up instead.');
         showToast('User not found. Please sign up to create an account.', 'info');
+        setShowPasswordForm(false);
       }
-    } catch (err) {
+    } catch (err: unknown) {
+      console.error('Check user error details:', err);
+      const errorResponse = err as { response?: { data?: { message?: string; success?: boolean } }; message?: string };
       const errorMessage = 
-        (err as { response?: { data?: { message?: string } }; message?: string })?.response?.data?.message ||
-        (err as { message?: string })?.message ||
+        errorResponse?.response?.data?.message ||
+        errorResponse?.message ||
         'Failed to check user. Please try again.';
       setError(errorMessage);
       showToast(errorMessage, 'error');
-      console.error('Check user error:', err);
+      setShowPasswordForm(false);
     } finally {
       setIsCheckingEmail(false);
     }
@@ -121,36 +127,63 @@ export function SignIn() {
       return;
     }
 
+    if (!email.trim()) {
+      setError('Email is required');
+      showToast('Email is required', 'error');
+      return;
+    }
+
     setIsSigningIn(true);
 
     try {
+      console.log('Attempting login with email:', email.trim());
       const response = await api.post('users/login', {
         email: email.trim(),
         password,
       });
 
-      console.log('Sign in API response:', response.data);
+      console.log('Sign in API full response:', response);
+      console.log('Sign in API response.data:', response.data);
 
       // Backend returns: { statusCode, success, message, data: { user, accessToken } }
-      const token = response.data.data?.accessToken;
+      const responseData = response.data;
+      const token = responseData?.data?.accessToken;
+      
+      console.log('Access token received:', token ? 'Yes' : 'No');
+      
       if (!token) {
-        throw new Error('No token received from server');
+        throw new Error('No access token received from server');
       }
 
-      // Store token temporarily in sessionStorage for OTP verification
-      sessionStorage.setItem('pendingAuthToken', token);
-
-      // After login, redirect to OTP verification
-      showToast('Please verify your email with OTP', 'info');
-      navigate(`/verify-otp/${encodeURIComponent(email)}`);
+      // Based on backend logic, login only succeeds if user is already verified
+      // So we can directly use the token for authentication
+      loginUser(token);
+      showToast('Login successful!', 'success');
+      
+      // Redirect based on auth context (source domain, redirect URL, etc.)
+      if (auth.redirectUrl) {
+        const redirectUrl = new URL(auth.redirectUrl);
+        redirectUrl.searchParams.set('code', token);
+        if (auth.state) {
+          redirectUrl.searchParams.set('state', auth.state);
+        }
+        window.location.href = redirectUrl.toString();
+      } else if (auth.sourceDomain) {
+        const protocol = auth.sourceDomain.startsWith('http') ? '' : 'https://';
+        const redirectUrl = `${protocol}${auth.sourceDomain}/cb?code=${token}${auth.state ? `&state=${auth.state}` : ''}`;
+        window.location.href = redirectUrl;
+      } else {
+        navigate('/dashboard');
+      }
     } catch (err: unknown) {
+      console.error('Sign in error details:', err);
+      const errorResponse = err as { response?: { data?: { message?: string } }; message?: string };
       const errorMessage = 
-        (err as { response?: { data?: { message?: string } }; message?: string })?.response?.data?.message ||
-        (err as { message?: string })?.message ||
+        errorResponse?.response?.data?.message ||
+        errorResponse?.message ||
         'Sign in failed. Please try again.';
       setError(errorMessage);
       showToast(errorMessage, 'error');
-      console.error('Sign in error:', err);
     } finally {
       setIsSigningIn(false);
     }
